@@ -2,6 +2,7 @@ import pygame
 import random
 import math
 import csv
+from ai import CursorMovementAnalyzer
 
 pygame.init()
 
@@ -10,7 +11,7 @@ HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("ReCaptcha")
 
-# Colors
+# Colors 
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 BLACK = (0, 0, 0)
@@ -22,6 +23,7 @@ GREEN = (0, 255, 0)
 START_SCREEN = 0
 PLAYING = 1
 GAME_OVER = 2
+ANALYSIS_SCREEN = 3 
 
 # Player settings
 player_size = 20
@@ -34,50 +36,6 @@ player_movements = []
 cursor_movements = []
 last_player_pos = None
 last_cursor_pos = None
-
-class MovementTracker:
-    def __init__(self):
-        self.last_pos = None
-        self.accumulator = [0, 0]
-        self.sampling_rate = 16.67  # ~60Hz sampling
-        self.last_sample_time = 0
-        self.movement_buffer = []
-        
-    def update(self, current_pos, current_time):
-        if self.last_pos is None:
-            self.last_pos = current_pos.copy()
-            self.last_sample_time = current_time
-            return None
-            
-        # Calculate sub-pixel movement
-        dx = current_pos[0] - self.last_pos[0]
-        dy = current_pos[1] - self.last_pos[1]
-        
-        # Accumulate sub-pixel movements
-        self.accumulator[0] += dx
-        self.accumulator[1] += dy
-        
-        # Check if enough time has passed for a new sample
-        time_delta = current_time - self.last_sample_time
-        if time_delta >= self.sampling_rate:
-            # Add some subtle variation to make movement more natural
-            noise_x = random.uniform(-0.2, 0.2)
-            noise_y = random.uniform(-0.2, 0.2)
-            
-            # Record position with accumulated movement and noise
-            recorded_pos = [
-                self.last_pos[0] + self.accumulator[0] + noise_x,
-                self.last_pos[1] + self.accumulator[1] + noise_y
-            ]
-            
-            # Reset accumulator and update last position
-            self.accumulator = [0, 0]
-            self.last_pos = current_pos.copy()
-            self.last_sample_time = current_time
-            
-            return recorded_pos
-        
-        return None
 
 class Wall:
     def __init__(self, x, y, width, height):
@@ -195,22 +153,14 @@ def init_game():
     player_pos = [150, HEIGHT - 150]
     walls = create_walls()
     enemies = create_random_enemies(walls, player_pos)
-    movement_tracker = MovementTracker()
     return {
         'player_pos': player_pos,
         'walls': walls,
         'enemies': enemies,
         'game_state': START_SCREEN,
         'game_won': False,
-        'data_saved': False,
-        'movement_tracker': movement_tracker
+        'data_saved': False
     }
-
-def update_game(game_data, current_time):
-    if game_data['game_state'] == PLAYING and not game_data['game_won']:
-        recorded_pos = game_data['movement_tracker'].update(game_data['player_pos'], current_time)
-        if recorded_pos:
-            record_movement(current_time, recorded_pos[0], recorded_pos[1], player_movements)
 
 def record_movement(timestamp, x, y, movement_list):
     movement_list.append([timestamp, x, y])
@@ -247,14 +197,62 @@ def clear_movement_data():
         writer = csv.writer(file)
         writer.writerow(['Timestamp', 'X', 'Y'])
 
+def draw_tick_mark(screen, x, y, size):
+    """Draw a green tick mark."""
+    points = [
+        (x - size, y),
+        (x - size/3, y + size/1.5),
+        (x + size, y - size)
+    ]
+    pygame.draw.lines(screen, GREEN, False, points, 4)
+
+def draw_cross_mark(screen, x, y, size):
+    """Draw a red X mark."""
+    pygame.draw.line(screen, RED, (x - size, y - size), (x + size, y + size), 4)
+    pygame.draw.line(screen, RED, (x - size, y + size), (x + size, y - size), 4)
+
+def show_analysis_results(screen, is_human):
+    """Display the analysis results with visual feedback."""
+    screen.fill(BLACK)
+    
+    # Draw the main text
+    font = pygame.font.Font(None, 48)
+    result_text = "Analysis Complete"
+    text_surface = font.render(result_text, True, WHITE)
+    text_rect = text_surface.get_rect(center=(WIDTH/2, HEIGHT/3))
+    screen.blit(text_surface, text_rect)
+    
+    # Draw the verdict
+    verdict_font = pygame.font.Font(None, 36)
+    verdict_text = "Human Player Detected" if is_human else "Bot Behavior Detected"
+    verdict_surface = verdict_font.render(verdict_text, True, GREEN if is_human else RED)
+    verdict_rect = verdict_surface.get_rect(center=(WIDTH/2, HEIGHT/2))
+    screen.blit(verdict_surface, verdict_rect)
+    
+    # Draw tick or cross
+    if is_human:
+        draw_tick_mark(screen, WIDTH/2, HEIGHT*2/3, 40)
+    else:
+        draw_cross_mark(screen, WIDTH/2, HEIGHT*2/3, 40)
+    
+    # Draw restart instruction
+    instruction_font = pygame.font.Font(None, 24)
+    instruction_text = "Press R to Play Again"
+    instruction_surface = instruction_font.render(instruction_text, True, WHITE)
+    instruction_rect = instruction_surface.get_rect(center=(WIDTH/2, HEIGHT*4/5))
+    screen.blit(instruction_surface, instruction_rect)
+
+# Modify the game loop
 game_data = init_game()
 running = True
 clock = pygame.time.Clock()
+analyzer = CursorMovementAnalyzer()
+
 
 font = pygame.font.Font(None, 74)
 small_font = pygame.font.Font(None, 36)
 
-
+# Initialize the CSV files with headers
 clear_movement_data()
 
 while running:
@@ -300,7 +298,12 @@ while running:
     elif game_data['game_state'] == PLAYING:
         if not game_data['game_won']:
             # Track player movement
-            update_game(game_data, current_time)
+            current_player_pos = game_data['player_pos'].copy()
+            if last_player_pos is None:
+                last_player_pos = current_player_pos
+            elif current_player_pos != last_player_pos:
+                record_movement(current_time, current_player_pos[0], current_player_pos[1], player_movements)
+                last_player_pos = current_player_pos.copy()
             
             # Track cursor movement
             current_cursor_pos = pygame.mouse.get_pos()
@@ -310,7 +313,7 @@ while running:
                 record_movement(current_time, current_cursor_pos[0], current_cursor_pos[1], cursor_movements)
                 last_cursor_pos = current_cursor_pos
 
-
+            # Handle player movement
             new_pos = game_data['player_pos'].copy()
             keys = pygame.key.get_pressed()
             if keys[pygame.K_a]:
@@ -348,16 +351,22 @@ while running:
             game_data['game_won'] = True
             if not game_data['data_saved']:
                 save_movements_to_csv()
-                game_data['data_saved'] = True
-            
-            win_text = font.render('You Won!', True, WHITE)
-            restart_text = small_font.render('Press R to Restart', True, WHITE)
-            
-            win_rect = win_text.get_rect(center=(WIDTH/2, HEIGHT/2))
-            restart_rect = restart_text.get_rect(center=(WIDTH/2, HEIGHT/2 + 50))
-            
-            screen.blit(win_text, win_rect)
-            screen.blit(restart_text, restart_rect)
+                # Analyze the movement data
+                try:
+                    cursor_data = analyzer.csvreader(CURSOR_FILE)
+                    analysis_result = analyzer.predict_movement_type(cursor_data)
+                    is_human = analysis_result['prediction'] == 'human'
+                    game_data['is_human'] = is_human
+                    game_data['data_saved'] = True
+                    game_data['game_state'] = ANALYSIS_SCREEN
+                except Exception as e:
+                    print(f"Analysis error: {str(e)}")
+                    game_data['is_human'] = True  # Default to human if analysis fails
+                    game_data['data_saved'] = True
+                    game_data['game_state'] = ANALYSIS_SCREEN
+    
+    elif game_data['game_state'] == ANALYSIS_SCREEN:
+        show_analysis_results(screen, game_data['is_human'])
     
     pygame.display.flip()
     clock.tick(60)
