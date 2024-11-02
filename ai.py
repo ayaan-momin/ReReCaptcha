@@ -12,9 +12,6 @@ class CursorMovementAnalyzer:
         """Load and preprocess cursor movement data."""
         df = pd.read_csv(file_path)
         return df
-    
-    def csvreader(CURSOR_FILE):
-        pd.read_csv(CURSOR_FILE)
         
     def extract_features(self, df):
         """Extract meaningful features from cursor movement data."""

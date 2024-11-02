@@ -224,7 +224,7 @@ def show_analysis_results(screen, is_human):
     
     # Draw the verdict
     verdict_font = pygame.font.Font(None, 36)
-    verdict_text = "Human Player Detected" if is_human else "Bot Behavior Detected"
+    verdict_text = "Human Detected" if is_human else "Bot Behavior Detected"
     verdict_surface = verdict_font.render(verdict_text, True, GREEN if is_human else RED)
     verdict_rect = verdict_surface.get_rect(center=(WIDTH/2, HEIGHT/2))
     screen.blit(verdict_surface, verdict_rect)
@@ -353,7 +353,7 @@ while running:
                 save_movements_to_csv()
                 # Analyze the movement data
                 try:
-                    cursor_data = analyzer.csvreader(CURSOR_FILE)
+                    cursor_data = analyzer.load_data(CURSOR_FILE)
                     analysis_result = analyzer.predict_movement_type(cursor_data)
                     is_human = analysis_result['prediction'] == 'human'
                     game_data['is_human'] = is_human
